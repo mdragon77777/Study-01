@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Handwritten Digit Recognizer</title>
+<!-- TensorFlow.js runs the neural network directly in the browser (WebGL accelerated) -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #6b7280;
+    --accent: #2563eb; --bar: #dbe3f5; --border: #d6dae1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161b; --panel: #1e2128; --text: #e7e9ee; --muted: #9aa1ad;
+      --accent: #5b8cff; --bar: #2c3342; --border: #343944;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; }
+  .subtitle { color: var(--muted); margin: 0 0 20px; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  .row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; flex: 1 1 300px;
+  }
+  #draw {
+    width: 100%; max-width: 280px; aspect-ratio: 1; display: block;
+    background: #000; border-radius: 8px; touch-action: none; cursor: crosshair;
+  }
+  .buttons { display: flex; gap: 8px; margin-top: 12px; }
+  button {
+    font: inherit; padding: 8px 16px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #prediction { font-size: 4rem; font-weight: 700; line-height: 1; margin: 4px 0 4px; }
+  #confidence { color: var(--muted); margin-bottom: 12px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-variant-numeric: tabular-nums; }
+  .bar-label { width: 14px; }
+  .bar-track { flex: 1; height: 14px; background: var(--bar); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
+  .bar-value { width: 48px; text-align: right; color: var(--muted); font-size: 0.85rem; }
+  #status { margin-top: 20px; color: var(--muted); font-size: 0.9rem; white-space: pre-line; }
+  #preview { width: 84px; height: 84px; image-rendering: pixelated; background: #000; border-radius: 4px; }
+  .preview-box { display: flex; align-items: center; gap: 10px; margin-top: 12px; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Handwritten Digit Recognizer</h1>
+  <p class="subtitle">Draw a single digit (0–9) in the black box. A CNN trained on MNIST will recognize it.</p>
+
+  <div class="row">
+    <div class="panel">
+      <canvas id="draw" width="280" height="280"></canvas>
+      <div class="buttons">
+        <button id="clearBtn">Clear</button>
+        <button id="retrainBtn">Retrain model</button>
+      </div>
+      <div class="preview-box">
+        <canvas id="preview" width="28" height="28"></canvas>
+        <span>What the model sees<br>(28×28, MNIST-style)</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div>Prediction</div>
+      <div id="prediction">–</div>
+      <div id="confidence">Draw a digit to start</div>
+      <div id="bars"></div>
+    </div>
+  </div>
+
+  <div id="status">Loading…</div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const IMAGE_SIZE = 784;              // 28 x 28 pixels
+const NUM_CLASSES = 10;              // digits 0-9
+const NUM_DATASET_ELEMENTS = 65000;  // total images in the MNIST sprite
+const NUM_TRAIN_ELEMENTS = 55000;    // first 55k used for training, rest for testing
+const MNIST_IMAGES_URL = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
+const MNIST_LABELS_URL = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+const MODEL_STORAGE_KEY = 'localstorage://mnist-cnn-v1';
+
+const statusEl = document.getElementById('status');
+const setStatus = (msg) => { statusEl.textContent = msg; };
+
+let model = null;
+
+// ---------------------------------------------------------------------------
+// MNIST data loading
+// ---------------------------------------------------------------------------
+
+/**
+ * Downloads the MNIST sprite image and label file, and returns
+ * normalized pixel data (Float32Array) and one-hot labels (Uint8Array).
+ */
+async function loadMnist() {
+  // The sprite is a 784 x 65000 PNG: each row holds one flattened 28x28 image.
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  const imgLoaded = new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new Error('Failed to load MNIST images'));
+  });
+  img.src = MNIST_IMAGES_URL;
+
+  const labelsResponse = fetch(MNIST_LABELS_URL);
+  await imgLoaded;
+
+  // Read the sprite in chunks to stay within canvas size limits.
+  const images = new Float32Array(NUM_DATASET_ELEMENTS * IMAGE_SIZE);
+  const chunkSize = 5000;
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = chunkSize;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  for (let i = 0; i < NUM_DATASET_ELEMENTS / chunkSize; i++) {
+    ctx.drawImage(img, 0, i * chunkSize, img.width, chunkSize, 0, 0, img.width, chunkSize);
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const offset = i * chunkSize * IMAGE_SIZE;
+    // Images are grayscale, so the red channel is enough.
+    for (let j = 0; j < pixels.length / 4; j++) {
+      images[offset + j] = pixels[j * 4] / 255;
+    }
+  }
+
+  const labels = new Uint8Array(await (await labelsResponse).arrayBuffer());
+  return { images, labels };
+}
+
+// ---------------------------------------------------------------------------
+// Model definition and training
+// ---------------------------------------------------------------------------
+
+/** Builds a small convolutional neural network for 28x28 grayscale digits. */
+function createModel() {
+  const m = tf.sequential();
+  m.add(tf.layers.conv2d({ inputShape: [28, 28, 1], filters: 32, kernelSize: 3, activation: 'relu' }));
+  m.add(tf.layers.maxPooling2d({ poolSize: 2 }));
+  m.add(tf.layers.conv2d({ filters: 64, kernelSize: 3, activation: 'relu' }));
+  m.add(tf.layers.maxPooling2d({ poolSize: 2 }));
+  m.add(tf.layers.flatten());
+  m.add(tf.layers.dropout({ rate: 0.25 }));
+  m.add(tf.layers.dense({ units: 128, activation: 'relu' }));
+  m.add(tf.layers.dropout({ rate: 0.25 }));
+  m.add(tf.layers.dense({ units: NUM_CLASSES, activation: 'softmax' }));
+  m.compile({ optimizer: tf.train.adam(), loss: 'categoricalCrossentropy', metrics: ['accuracy'] });
+  return m;
+}
+
+/** Downloads MNIST, trains a new model, evaluates it, and saves it to localStorage. */
+async function trainModel() {
+  setStatus('Downloading MNIST dataset (about 10 MB)…');
+  const { images, labels } = await loadMnist();
+
+  const trainX = tf.tensor4d(images.subarray(0, NUM_TRAIN_ELEMENTS * IMAGE_SIZE), [NUM_TRAIN_ELEMENTS, 28, 28, 1]);
+  const trainY = tf.tensor2d(labels.subarray(0, NUM_TRAIN_ELEMENTS * NUM_CLASSES), [NUM_TRAIN_ELEMENTS, NUM_CLASSES]);
+  const numTest = NUM_DATASET_ELEMENTS - NUM_TRAIN_ELEMENTS;
+  const testX = tf.tensor4d(images.subarray(NUM_TRAIN_ELEMENTS * IMAGE_SIZE), [numTest, 28, 28, 1]);
+  const testY = tf.tensor2d(labels.subarray(NUM_TRAIN_ELEMENTS * NUM_CLASSES), [numTest, NUM_CLASSES]);
+
+  const m = createModel();
+  const epochs = 3;
+  const batchSize = 128;
+  const batchesPerEpoch = Math.ceil(NUM_TRAIN_ELEMENTS / batchSize);
+
+  await m.fit(trainX, trainY, {
+    epochs,
+    batchSize,
+    shuffle: true,
+    callbacks: {
+      onBatchEnd: async (batch, logs) => {
+        if (batch % 20 === 0) {
+          const pct = ((batch / batchesPerEpoch) * 100).toFixed(0);
+          setStatus(`Training… epoch ${currentEpoch + 1}/${epochs}, ${pct}%  ` +
+                    `(loss ${logs.loss.toFixed(3)}, accuracy ${(logs.acc * 100).toFixed(1)}%)`);
+        }
+        await tf.nextFrame(); // keep the UI responsive
+      },
+      onEpochBegin: async (epoch) => { currentEpoch = epoch; },
+    },
+  });
+
+  setStatus('Evaluating on 10,000 test images…');
+  const [, testAcc] = m.evaluate(testX, testY, { batchSize: 512 });
+  const accuracy = (await testAcc.data())[0];
+
+  tf.dispose([trainX, trainY, testX, testY]);
+  await m.save(MODEL_STORAGE_KEY);
+  setStatus(`Model trained. Test accuracy: ${(accuracy * 100).toFixed(2)}%. ` +
+            `Saved in this browser, so the next visit loads instantly.`);
+  return m;
+}
+let currentEpoch = 0;
+
+/** Loads a previously trained model, or trains a new one if none is cached. */
+async function initModel(forceRetrain = false) {
+  retrainBtn.disabled = true;
+  try {
+    if (!forceRetrain) {
+      try {
+        model = await tf.loadLayersModel(MODEL_STORAGE_KEY);
+        setStatus('Loaded the trained model from browser storage. Ready!');
+        return;
+      } catch (_) {
+        // No cached model yet; fall through to training.
+      }
+    }
+    model = await trainModel();
+  } catch (err) {
+    setStatus('Error: ' + err.message + '\nCheck your internet connection and reload the page.');
+  } finally {
+    retrainBtn.disabled = false;
+    predict();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Drawing canvas
+// ---------------------------------------------------------------------------
+const drawCanvas = document.getElementById('draw');
+const drawCtx = drawCanvas.getContext('2d', { willReadFrequently: true });
+const clearBtn = document.getElementById('clearBtn');
+const retrainBtn = document.getElementById('retrainBtn');
+let drawing = false;
+let lastPoint = null;
+
+function clearCanvas() {
+  drawCtx.fillStyle = '#000';
+  drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
+  previewCtx.fillStyle = '#000';
+  previewCtx.fillRect(0, 0, 28, 28);
+  resetResult();
+}
+
+/** Converts a pointer event to canvas pixel coordinates. */
+function getPoint(e) {
+  const rect = drawCanvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (drawCanvas.width / rect.width),
+    y: (e.clientY - rect.top) * (drawCanvas.height / rect.height),
+  };
+}
+
+drawCanvas.addEventListener('pointerdown', (e) => {
+  drawing = true;
+  drawCanvas.setPointerCapture(e.pointerId);
+  lastPoint = getPoint(e);
+  drawLine(lastPoint, lastPoint);
+});
+drawCanvas.addEventListener('pointermove', (e) => {
+  if (!drawing) return;
+  const p = getPoint(e);
+  drawLine(lastPoint, p);
+  lastPoint = p;
+  predict();
+});
+const stopDrawing = () => { if (drawing) { drawing = false; predict(); } };
+drawCanvas.addEventListener('pointerup', stopDrawing);
+drawCanvas.addEventListener('pointercancel', stopDrawing);
+
+function drawLine(from, to) {
+  drawCtx.strokeStyle = '#fff';
+  drawCtx.lineWidth = 18;
+  drawCtx.lineCap = 'round';
+  drawCtx.lineJoin = 'round';
+  drawCtx.beginPath();
+  drawCtx.moveTo(from.x, from.y);
+  drawCtx.lineTo(to.x, to.y);
+  drawCtx.stroke();
+}
+
+clearBtn.addEventListener('click', clearCanvas);
+retrainBtn.addEventListener('click', () => initModel(true));
+
+// ---------------------------------------------------------------------------
+// Preprocessing: make the drawing look like an MNIST sample
+// ---------------------------------------------------------------------------
+const previewCanvas = document.getElementById('preview');
+const previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
+
+/**
+ * MNIST digits are fit into a 20x20 box (keeping aspect ratio) and then
+ * centered by center of mass inside a 28x28 image. We do the same here.
+ * Returns a Float32Array of 784 values in [0, 1], or null if the canvas is empty.
+ */
+function preprocess() {
+  const { width, height } = drawCanvas;
+  const data = drawCtx.getImageData(0, 0, width, height).data;
+
+  // 1. Find the bounding box of the drawn strokes.
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4] > 20) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+
+  // 2. Scale the bounding box so its longer side becomes 20 pixels.
+  const boxW = maxX - minX + 1;
+  const boxH = maxY - minY + 1;
+  const scale = 20 / Math.max(boxW, boxH);
+  const scaledW = Math.max(1, Math.round(boxW * scale));
+  const scaledH = Math.max(1, Math.round(boxH * scale));
+
+  const tmp = document.createElement('canvas');
+  tmp.width = 28;
+  tmp.height = 28;
+  const tmpCtx = tmp.getContext('2d', { willReadFrequently: true });
+  tmpCtx.fillStyle = '#000';
+  tmpCtx.fillRect(0, 0, 28, 28);
+  tmpCtx.imageSmoothingEnabled = true;
+  tmpCtx.imageSmoothingQuality = 'high';
+  tmpCtx.drawImage(drawCanvas, minX, minY, boxW, boxH,
+                   (28 - scaledW) / 2, (28 - scaledH) / 2, scaledW, scaledH);
+
+  // 3. Shift the image so its center of mass sits at the center (14, 14).
+  const small = tmpCtx.getImageData(0, 0, 28, 28).data;
+  let mass = 0, cx = 0, cy = 0;
+  for (let y = 0; y < 28; y++) {
+    for (let x = 0; x < 28; x++) {
+      const v = small[(y * 28 + x) * 4];
+      mass += v; cx += x * v; cy += y * v;
+    }
+  }
+  const shiftX = Math.round(14 - cx / mass);
+  const shiftY = Math.round(14 - cy / mass);
+
+  previewCtx.fillStyle = '#000';
+  previewCtx.fillRect(0, 0, 28, 28);
+  previewCtx.drawImage(tmp, shiftX, shiftY);
+
+  // 4. Read the final 28x28 image as normalized grayscale values.
+  const finalPixels = previewCtx.getImageData(0, 0, 28, 28).data;
+  const input = new Float32Array(IMAGE_SIZE);
+  for (let i = 0; i < IMAGE_SIZE; i++) input[i] = finalPixels[i * 4] / 255;
+  return input;
+}
+
+// ---------------------------------------------------------------------------
+// Prediction and result display
+// ---------------------------------------------------------------------------
+const predictionEl = document.getElementById('prediction');
+const confidenceEl = document.getElementById('confidence');
+const barsEl = document.getElementById('bars');
+const barFills = [];
+const barValues = [];
+
+// Build one probability bar per digit.
+for (let d = 0; d < NUM_CLASSES; d++) {
+  const row = document.createElement('div');
+  row.className = 'bar-row';
+  row.innerHTML = `<span class="bar-label">${d}</span>
+    <div class="bar-track"><div class="bar-fill"></div></div>
+    <span class="bar-value">0.0%</span>`;
+  barsEl.appendChild(row);
+  barFills.push(row.querySelector('.bar-fill'));
+  barValues.push(row.querySelector('.bar-value'));
+}
+
+function resetResult() {
+  predictionEl.textContent = '–';
+  confidenceEl.textContent = 'Draw a digit to start';
+  for (let d = 0; d < NUM_CLASSES; d++) {
+    barFills[d].style.width = '0%';
+    barValues[d].textContent = '0.0%';
+  }
+}
+
+let predictPending = false;
+
+/** Runs the model on the current drawing (throttled to one call per frame). */
+function predict() {
+  if (!model || predictPending) return;
+  predictPending = true;
+  requestAnimationFrame(async () => {
+    predictPending = false;
+    const input = preprocess();
+    if (!input) { resetResult(); return; }
+
+    const probs = tf.tidy(() => model.predict(tf.tensor4d(input, [1, 28, 28, 1])).squeeze());
+    const values = await probs.data();
+    probs.dispose();
+
+    let best = 0;
+    for (let d = 1; d < NUM_CLASSES; d++) if (values[d] > values[best]) best = d;
+
+    predictionEl.textContent = best;
+    confidenceEl.textContent = `Confidence: ${(values[best] * 100).toFixed(1)}%`;
+    for (let d = 0; d < NUM_CLASSES; d++) {
+      const pct = values[d] * 100;
+      barFills[d].style.width = pct + '%';
+      barValues[d].textContent = pct.toFixed(1) + '%';
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+clearCanvas();
+initModel();
+</script>
+</body>
+</html>
