@@ -1,0 +1,7 @@
+# Python virtual environment and caches
+.venv/
+__pycache__/
+
+# Downloaded MNIST dataset and trained model weights
+data/
+*.pt
