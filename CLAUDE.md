@@ -6,8 +6,10 @@
 
 같은 손글씨 숫자 인식기를 두 가지로 구현한 공부용 저장소다. 캔버스에 숫자를 그리면 MNIST로 학습한 CNN이 어떤 숫자인지 예측한다. 빌드 단계, 린터, 테스트는 없다.
 
-- `digit_recognizer.html`: 브라우저 버전. HTML, CSS, 인라인 JS가 모두 들어 있는 단일 페이지이며, jsDelivr CDN에서 TensorFlow.js를 불러온다.
-- `train.py` + `digit_recognizer.py`: 파이썬 데스크톱 버전(PyTorch CPU + Tkinter + Pillow).
+- `Web/digit_recognizer.html`: 브라우저 버전. HTML, CSS, 인라인 JS가 모두 들어 있는 단일 페이지이며, jsDelivr CDN에서 TensorFlow.js를 불러온다.
+- `Python/train.py` + `Python/digit_recognizer.py`: 파이썬 데스크톱 버전(PyTorch CPU + Tkinter + Pillow).
+
+각 폴더의 `README.md`에 그 버전의 실행 방법이 있다. 가상환경 `.venv/`는 두 폴더 밖, 저장소 루트에 있다.
 
 ## 작성 규칙
 
@@ -17,17 +19,17 @@
 
 ## 실행 방법
 
-**웹:** 브라우저에서 `digit_recognizer.html`을 열거나, `python -m http.server`로 폴더를 띄운다. TF.js CDN과 MNIST 데이터를 받아야 하므로 인터넷 연결이 필요하다. 이 페이지는 GitHub Pages(`main` 브랜치 / 루트)로 https://mdragon77777.github.io/Study-01/digit_recognizer.html 에 게시되어 있다. `main`에 push하면 1~2분 안에 다시 배포된다.
+**웹:** 브라우저에서 `Web/digit_recognizer.html`을 열거나, `python -m http.server`로 폴더를 띄운다. TF.js CDN과 MNIST 데이터를 받아야 하므로 인터넷 연결이 필요하다. 이 페이지는 GitHub Pages(`main` 브랜치 / 루트)로 https://mdragon77777.github.io/Study-01/Web/digit_recognizer.html 에 게시되어 있다. `main`에 push하면 1~2분 안에 다시 배포된다.
 
-**파이썬** (Windows, 프로젝트 가상환경은 `.venv/`):
+**파이썬** (Windows, 저장소 루트에서 실행, 프로젝트 가상환경은 루트의 `.venv/`):
 ```
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
-.\.venv\Scripts\python.exe train.py [--epochs N] [--batch-size N]   # mnist_cnn.pt 생성 (3 epoch에 테스트 정확도 약 99%)
-.\.venv\Scripts\python.exe digit_recognizer.py                      # mnist_cnn.pt가 없으면 먼저 학습한다
+.\.venv\Scripts\python.exe -m pip install -r Python\requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python.exe Python\train.py [--epochs N] [--batch-size N]   # Python\mnist_cnn.pt 생성 (3 epoch에 테스트 정확도 약 99%)
+.\.venv\Scripts\python.exe Python\digit_recognizer.py                      # mnist_cnn.pt가 없으면 먼저 학습한다
 ```
-`.py` 파일을 더블클릭하면 가상환경이 아닌 시스템 Python으로 실행되어 `torch`를 찾지 못한다. 더블클릭으로 실행하려면 `run_digit_recognizer.bat`을 쓴다.
+`.py` 파일을 더블클릭하면 가상환경이 아닌 시스템 Python으로 실행되어 `torch`를 찾지 못한다. 더블클릭으로 실행하려면 `Python\run_digit_recognizer.bat`을 쓴다. 이 파일은 `..\.venv`를 가리킨다.
 
-`data/`(torchvision이 내려받는 MNIST), `mnist_cnn.pt`, `.venv/`는 gitignore 대상이다.
+`train.py`는 `data/`(torchvision이 내려받는 MNIST)와 `mnist_cnn.pt`의 경로를 스크립트 위치 기준으로 잡으므로 둘 다 `Python/` 안에 생긴다. 이 둘과 `.venv/`는 gitignore 대상이다.
 
 ## 다른 PC에서 작업하기
 

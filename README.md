@@ -2,8 +2,8 @@
 
 손글씨 숫자 인식기를 두 가지로 구현한 공부용 저장소다. 캔버스에 숫자를 그리면 MNIST로 학습한 CNN이 어떤 숫자인지 예측한다.
 
-- 웹 버전: `digit_recognizer.html` (TensorFlow.js). 실행해 보기: https://mdragon77777.github.io/Study-01/digit_recognizer.html
-- 파이썬 버전: `train.py` + `digit_recognizer.py` (PyTorch CPU + Tkinter + Pillow). 더블클릭으로 실행하려면 `run_digit_recognizer.bat`을 쓴다.
+- 웹 버전: `Web/` 폴더의 `digit_recognizer.html` (TensorFlow.js). 실행해 보기: https://mdragon77777.github.io/Study-01/Web/digit_recognizer.html 자세한 내용은 `Web/README.md`에 있다.
+- 파이썬 버전: `Python/` 폴더의 `train.py` + `digit_recognizer.py` (PyTorch CPU + Tkinter + Pillow). 더블클릭으로 실행하려면 `Python\run_digit_recognizer.bat`을 쓴다. 자세한 내용은 `Python/README.md`에 있다.
 
 ## 다른 PC에서 작업하기
 
@@ -21,9 +21,9 @@
 git clone https://github.com/mdragon77777/Study-01.git C:\dev\Study-01
 cd C:\dev\Study-01
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python.exe -m pip install -r Python\requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 ```
-gitignore 대상인 파일은 clone해도 받아지지 않는다. `mnist_cnn.pt`는 다른 PC에서 복사해 오거나, 첫 실행 때 자동으로 학습시키면 된다. `data/`는 자동으로 내려받는다.
+가상환경 `.venv/`는 저장소 루트에 둔다. gitignore 대상인 파일은 clone해도 받아지지 않는다. `Python\mnist_cnn.pt`는 다른 PC에서 복사해 오거나, 첫 실행 때 자동으로 학습시키면 된다. `data/`는 자동으로 내려받는다.
 
 **동기화:** 작업을 시작할 때 `git pull`, 끝낼 때 커밋한 뒤 `git push`를 한다.
 
