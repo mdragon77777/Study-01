@@ -29,6 +29,12 @@
 
 `data/`(torchvision이 내려받는 MNIST), `mnist_cnn.pt`, `.venv/`는 gitignore 대상이다.
 
+## 다른 PC에서 작업하기
+
+설치, clone, 동기화 방법은 `README.md`에 있다. 아래 import로 함께 읽힌다.
+
+@README.md
+
 ## 구조
 
 두 버전은 같은 CNN 구조(conv32-3×3 → pool → conv64-3×3 → pool → dropout → dense128 → dropout → dense10)와 같은 입력 전처리를 쓴다.
